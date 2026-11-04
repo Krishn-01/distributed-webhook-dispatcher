@@ -1,0 +1,141 @@
+{
+  "info": {
+    "name": "Distributed Webhook Dispatcher Engine",
+    "_postman_id": "a983b745-f033-4f93-b413-5a02298bc671",
+    "description": "Complete Postman collection for the Distributed Webhook Dispatcher Engine.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "jobId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Checks connectivity to API, PostgreSQL and Redis."
+      }
+    },
+    {
+      "name": "Dispatch Webhook (Valid)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "if (jsonData.jobId) {",
+              "    pm.collectionVariables.set('jobId', jsonData.jobId);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinationUrl\": \"https://webhook.site/test-endpoint\",\n  \"eventId\": \"evt_{{$timestamp}}\",\n  \"payload\": {\n    \"event\": \"user.signup\",\n    \"userId\": \"usr_999\",\n    \"timestamp\": \"{{$isoTimestamp}}\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/dispatch",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks", "dispatch"]
+        },
+        "description": "Ingests a webhook event, returns 202 Accepted immediately, queues for async delivery."
+      }
+    },
+    {
+      "name": "Dispatch Webhook (Duplicate Idempotency)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinationUrl\": \"https://webhook.site/test-endpoint\",\n  \"eventId\": \"evt_fixed_idempotent_test\",\n  \"payload\": {\n    \"event\": \"payment.completed\",\n    \"orderId\": \"ord_1001\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/dispatch",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks", "dispatch"]
+        },
+        "description": "Submitting same eventId multiple times returns existing jobId without double enqueueing."
+      }
+    },
+    {
+      "name": "Dispatch Webhook (Invalid URL - Validation Error)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinationUrl\": \"ftp://invalid-protocol.com/hook\",\n  \"eventId\": \"evt_bad_url\",\n  \"payload\": {\n    \"test\": true\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/dispatch",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks", "dispatch"]
+        },
+        "description": "Tests validation error for non-HTTP(S) protocols."
+      }
+    },
+    {
+      "name": "Get Webhook Job Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/{{jobId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks", "{{jobId}}"]
+        },
+        "description": "Returns current delivery status, attempt count, domain, and last response code."
+      }
+    },
+    {
+      "name": "Get Delivery Attempt History",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/{{jobId}}/attempts",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks", "{{jobId}}", "attempts"]
+        },
+        "description": "Returns chronological delivery attempt log (attempt number, HTTP response code, duration, timestamps)."
+      }
+    }
+  ]
+}

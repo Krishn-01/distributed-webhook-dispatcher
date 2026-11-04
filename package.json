@@ -1,0 +1,62 @@
+{
+  "name": "distributed-webhook-dispatcher",
+  "version": "1.0.0",
+  "description": "Production-grade Distributed Webhook Dispatcher Engine with BullMQ, Redis rate-limiting, and PostgreSQL",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/workers/webhook.worker.ts",
+    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "start": "node dist/src/server.js",
+    "start:worker": "node dist/src/workers/webhook.worker.js",
+    "test": "jest --runInBand --detectOpenHandles --forceExit",
+    "test:unit": "jest tests/unit --runInBand",
+    "test:integration": "jest tests/integration --runInBand --detectOpenHandles --forceExit",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio"
+  },
+  "keywords": [
+    "webhook",
+    "dispatcher",
+    "bullmq",
+    "redis",
+    "postgresql",
+    "rate-limiting",
+    "exponential-backoff"
+  ],
+  "author": "Backend Engineer",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "axios": "^1.7.9",
+    "bullmq": "^5.34.4",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^11.0.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.7",
+    "@types/supertest": "^6.0.2",
+    "@types/swagger-ui-express": "^4.1.7",
+    "@types/uuid": "^10.0.0",
+    "jest": "^29.7.0",
+    "pino-pretty": "^13.0.0",
+    "prisma": "^5.22.0",
+    "rimraf": "^6.0.1",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

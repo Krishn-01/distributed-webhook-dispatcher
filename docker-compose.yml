@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: webhook_dispatcher_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: webhook_dispatcher
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d webhook_dispatcher"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: webhook_dispatcher_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webhook_dispatcher_api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: info
+      DATABASE_URL: "postgresql://postgres:postgrespassword@postgres:5432/webhook_dispatcher?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      ENABLE_SSRF_PROTECTION: "true"
+      WORKER_CONCURRENCY: 5
+      RATE_LIMIT_MAX_REQUESTS: 10
+      RATE_LIMIT_WINDOW_MS: 1000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "npx prisma db push && node dist/src/server.js"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webhook_dispatcher_worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      DATABASE_URL: "postgresql://postgres:postgrespassword@postgres:5432/webhook_dispatcher?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      ENABLE_SSRF_PROTECTION: "true"
+      WORKER_CONCURRENCY: 5
+      RATE_LIMIT_MAX_REQUESTS: 10
+      RATE_LIMIT_WINDOW_MS: 1000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: node dist/src/workers/webhook.worker.js
+
+volumes:
+  postgres_data:
+  redis_data:
