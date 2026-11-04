@@ -56,3 +56,4 @@ export async function checkRedisConnection(client?: Redis): Promise<boolean> {
     }
   }
 }
+

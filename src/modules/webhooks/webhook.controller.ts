@@ -75,3 +75,4 @@ export class WebhookController {
 }
 
 export const webhookController = new WebhookController();
+

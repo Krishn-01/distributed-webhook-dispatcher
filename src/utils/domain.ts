@@ -10,3 +10,4 @@ export function extractDomain(urlStr: string): string {
     throw new Error(`Invalid destination URL: ${urlStr}`);
   }
 }
+

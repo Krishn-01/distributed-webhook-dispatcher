@@ -245,3 +245,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => void handleTermination('SIGTERM'));
   process.on('SIGINT', () => void handleTermination('SIGINT'));
 }
+

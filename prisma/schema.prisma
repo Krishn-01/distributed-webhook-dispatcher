@@ -55,3 +55,4 @@ model DeliveryAttempt {
   @@index([createdAt])
   @@map("delivery_attempts")
 }
+

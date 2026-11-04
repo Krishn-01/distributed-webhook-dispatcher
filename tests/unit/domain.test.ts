@@ -17,3 +17,4 @@ describe('Domain Extractor Utility', () => {
     expect(() => extractDomain('not-a-valid-url')).toThrow('Invalid destination URL');
   });
 });
+

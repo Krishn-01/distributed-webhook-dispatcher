@@ -40,3 +40,4 @@ export const webhookJobIdParamSchema = z.object({
 });
 
 export type DispatchWebhookDto = z.infer<typeof dispatchWebhookSchema>;
+

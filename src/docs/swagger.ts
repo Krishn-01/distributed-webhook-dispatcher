@@ -217,3 +217,4 @@ export function swaggerJsonHandler(_req: Request, res: Response): void {
   res.setHeader('Content-Type', 'application/json');
   res.send(openApiDocument);
 }
+

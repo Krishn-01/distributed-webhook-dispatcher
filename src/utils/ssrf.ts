@@ -132,3 +132,4 @@ export async function validateDestinationUrl(urlStr: string, enabled = true): Pr
     throw new SecurityError(`Unable to resolve destination hostname "${hostname}": ${(err as Error).message}`);
   }
 }
+

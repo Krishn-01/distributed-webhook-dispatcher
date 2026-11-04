@@ -36,3 +36,4 @@ EXPOSE 3000
 
 # Default command runs the API server (override with `node dist/src/workers/webhook.worker.js` for background worker)
 CMD ["node", "dist/src/server.js"]
+

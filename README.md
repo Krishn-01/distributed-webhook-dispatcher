@@ -535,3 +535,4 @@ When reviewing or discussing this project during a technical interview:
 - **SSRF Hardening**: Validates both IP and resolved hostname, avoiding blind HTTP requests to internal networks or cloud metadata endpoints.
 - **Rate Limit Mechanism**: Destination-domain rate limiting via atomic Redis Lua scripts (`ratelimit:domain:{domain}`). Rate-limited jobs are delayed in BullMQ without incrementing attempt count or recording fake failed attempts.
 - **Retry Strategy**: Exponential backoff $2000 \times 2^{n-1}\text{ ms}$ for $n \in \{1, 2, 3\}$, bounded at 4 total attempts. Non-retryable errors (HTTP 4xx except 429) fail immediately.
+

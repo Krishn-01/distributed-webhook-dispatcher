@@ -40,3 +40,4 @@ This document maps all original requirements from the assignment PDF and the eng
 - **Non-blocking Architecture**: Verified via asynchronous BullMQ queue; ingestion controller immediately responds with 202 Accepted.
 - **Deployment Realism**: Verified with Docker Compose locally and ready-to-deploy configuration for Render/Railway with healthchecks and independent worker.
 - **Code Clarity & Architecture**: Clean modular architecture, TypeScript strict mode, comprehensive `README.md` and `ARCHITECTURE.md`.
+

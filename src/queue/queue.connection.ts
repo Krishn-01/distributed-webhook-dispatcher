@@ -23,3 +23,4 @@ export async function closeQueueRedisConnection(): Promise<void> {
     sharedRedisConnection = null;
   }
 }
+

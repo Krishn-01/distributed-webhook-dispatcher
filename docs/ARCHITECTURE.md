@@ -151,3 +151,4 @@ To prevent Server-Side Request Forgery (SSRF):
    - Cloud metadata services (e.g. `169.254.169.254` for AWS/GCP/Azure).
 3. **DNS Rebinding Prevention**: Pin the validated IP address to the outbound connection agent or verify resolution immediately prior to socket connection.
 4. **Safe Redirect Handling**: Disable automatic redirects (`maxRedirects: 0`) or re-validate every redirect URL through the SSRF filter.
+

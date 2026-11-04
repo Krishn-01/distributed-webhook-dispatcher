@@ -303,3 +303,4 @@ describe('Worker Processing & Orchestration Integration Tests', () => {
     expect(mockedRepo.recordAttempt).not.toHaveBeenCalled();
   });
 });
+
