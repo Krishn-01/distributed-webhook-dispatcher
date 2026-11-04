@@ -1,33 +1,19 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger';
-
-type PrismaClientWithEvents = PrismaClient<
-  Prisma.PrismaClientOptions,
-  'error' | 'warn'
->;
 
 declare global {
   // eslint-disable-next-line no-var
-  var prismaGlobal: PrismaClientWithEvents | undefined;
+  var prismaGlobal: PrismaClient | undefined;
 }
 
-export const prisma: PrismaClientWithEvents =
+export const prisma =
   global.prismaGlobal ??
   new PrismaClient({
-    log: [
-      { emit: 'event', level: 'error' },
-      { emit: 'event', level: 'warn' },
-    ],
+    log:
+      process.env.NODE_ENV === 'development'
+        ? ['error', 'warn']
+        : ['error'],
   });
-
-// Attach logging with full type-safety
-prisma.$on('error', (e) => {
-  logger.error({ error: e.message }, 'Prisma database error');
-});
-
-prisma.$on('warn', (e) => {
-  logger.warn({ warning: e.message }, 'Prisma database warning');
-});
 
 if (process.env.NODE_ENV !== 'production') {
   global.prismaGlobal = prisma;
