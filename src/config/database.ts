@@ -1,12 +1,17 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
+
+type PrismaClientWithEvents = PrismaClient<
+  Prisma.PrismaClientOptions,
+  'error' | 'warn'
+>;
 
 declare global {
   // eslint-disable-next-line no-var
-  var prismaGlobal: PrismaClient | undefined;
+  var prismaGlobal: PrismaClientWithEvents | undefined;
 }
 
-export const prisma =
+export const prisma: PrismaClientWithEvents =
   global.prismaGlobal ??
   new PrismaClient({
     log: [
@@ -15,10 +20,13 @@ export const prisma =
     ],
   });
 
-// Attach logging
-// @ts-expect-error prisma event typing
-prisma.$on('error', (e: { message: string }) => {
+// Attach logging with full type-safety
+prisma.$on('error', (e) => {
   logger.error({ error: e.message }, 'Prisma database error');
+});
+
+prisma.$on('warn', (e) => {
+  logger.warn({ warning: e.message }, 'Prisma database warning');
 });
 
 if (process.env.NODE_ENV !== 'production') {
