@@ -2,11 +2,25 @@
 
 **An asynchronous, reliable, and scalable webhook delivery system built with Node.js, TypeScript, BullMQ, Redis, PostgreSQL, and React.**
 
-[![Node.js](https://img.shields.io/badge/Node.js-24-green)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
-[![Redis](https://img.shields.io/badge/Redis-BullMQ-red)](https://redis.io/)
-[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-blue)](https://www.postgresql.org/)
-[![Docker](https://img.shields.io/badge/Container-Docker-blue)](https://www.docker.com/)
+<p align="center">
+
+  [![Node.js](https://img.shields.io/badge/Node.js-22%2B-green?logo=node.js)](https://nodejs.org/)
+  [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
+  [![Redis](https://img.shields.io/badge/Redis-BullMQ-red?logo=redis)](https://redis.io/)
+  [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-blue?logo=postgresql)](https://www.postgresql.org/)
+  [![Docker](https://img.shields.io/badge/Container-Docker-blue?logo=docker)](https://www.docker.com/)
+
+</p>
+
+<p align="center">
+
+  **[Live Dashboard](https://distributed-webhook-dispatcher-lgob.onrender.com)**
+  |
+  **[API Documentation](https://distributed-webhook-dispatcher-lgob.onrender.com/docs)**
+  |
+  **[GitHub Repository](https://github.com/Krishn-01/distributed-webhook-dispatcher)**
+
+</p>
 
 ---
 
@@ -16,18 +30,19 @@ Distributed Webhook Dispatcher is a backend system designed to deliver webhooks 
 
 Instead of sending HTTP requests directly, the system places webhook events into a background queue. Dedicated workers process these events, handle failures, retry unsuccessful deliveries, and maintain delivery records.
 
-The project also includes a React dashboard for monitoring webhook activity and delivery status.
+The project also includes a React-based dashboard for submitting webhook events and monitoring delivery activity in real time.
 
-## Problem It Solves
+## Problem Statement
 
-Traditional webhook implementations can face several problems:
+Traditional webhook implementations can encounter several challenges:
 
 - Slow destination servers can delay API responses.
-- Temporary failures can result in lost webhook events.
-- Repeated requests can overwhelm destination servers.
+- Temporary failures can result in unsuccessful event deliveries.
+- Repeated requests can overwhelm downstream services.
 - Tracking delivery attempts and failures can be difficult.
+- Synchronous processing can affect application responsiveness.
 
-**Solution:** An asynchronous queue-based architecture with background processing, automatic retries, rate limiting, persistent storage, and delivery monitoring.
+**Solution:** An asynchronous, queue-based architecture with background processing, automatic retries, exponential backoff, rate limiting, persistent storage, and delivery monitoring.
 
 ## Key Features
 
@@ -71,15 +86,15 @@ flowchart TD
 ## How It Works
 
 1. A client sends a webhook request to the API.
-2. The API validates the request and checks event uniqueness.
+2. The API validates the incoming request and checks event uniqueness.
 3. The event is stored in PostgreSQL.
 4. A background job is added to the BullMQ queue.
 5. The API immediately returns `202 Accepted` with a job ID.
-6. A worker picks up the queued job.
-7. Redis rate limiting and destination security checks are performed.
-8. The worker sends the HTTP POST request to the destination.
+6. A background worker picks up the queued job.
+7. Redis-based rate limiting and destination security checks are performed.
+8. The worker sends an HTTP POST request to the destination.
 9. Delivery attempts and response details are stored in PostgreSQL.
-10. Failed requests are retried according to the retry policy.
+10. Failed requests are retried according to the configured retry policy.
 
 ## Technology Stack
 
@@ -94,29 +109,31 @@ flowchart TD
 | API Documentation | Swagger / OpenAPI |
 | Testing | Jest, Supertest |
 | Infrastructure | Docker, Docker Compose |
+| Deployment | Render |
 
 ## Project Structure
 
 ```text
 distributed-webhook-dispatcher/
 │
-├── frontend/             # React dashboard
-├── prisma/               # Database schema and migrations
-├── docs/                 # Architecture documentation
-├── scripts/              # Verification scripts
+├── frontend/                  # React dashboard
+├── prisma/                    # Database schema and migrations
+├── docs/                      # Architecture documentation
+├── scripts/                   # Verification scripts
+│
 ├── src/
-│   ├── config/            # Application configuration
+│   ├── config/                # Application configuration
 │   ├── modules/
-│   │   ├── webhooks/      # Webhook API and business logic
-│   │   └── mock/          # Mock destination endpoints
-│   ├── queue/             # BullMQ queue configuration
-│   ├── services/          # Delivery and retry services
-│   ├── utils/             # Utility and security functions
-│   ├── workers/           # Background workers
+│   │   ├── webhooks/          # Webhook API and business logic
+│   │   └── mock/              # Mock destination endpoints
+│   ├── queue/                 # BullMQ queue configuration
+│   ├── services/              # Delivery and retry services
+│   ├── utils/                 # Utility and security functions
+│   ├── workers/               # Background workers
 │   ├── app.ts
 │   └── server.ts
 │
-├── tests/                 # Unit and integration tests
+├── tests/                     # Unit and integration tests
 ├── Dockerfile
 ├── docker-compose.yml
 ├── postman_collection.json
@@ -130,7 +147,7 @@ distributed-webhook-dispatcher/
 
 Make sure you have installed:
 
-- Node.js
+- Node.js 22 or later
 - npm
 - Docker Desktop
 - Git
@@ -151,7 +168,7 @@ npm install
 
 ### 3. Configure Environment Variables
 
-Create your local environment file:
+Create your local environment file.
 
 **Windows PowerShell:**
 
@@ -160,6 +177,8 @@ Copy-Item .env.example .env
 ```
 
 Update the database and Redis configuration if required.
+
+Never commit your actual `.env` file or expose production credentials.
 
 ### 4. Start the Application
 
@@ -186,6 +205,12 @@ docker compose ps
 
 ## API Endpoints
 
+**Production Base URL:**
+
+```text
+https://distributed-webhook-dispatcher-lgob.onrender.com
+```
+
 | Method | Endpoint | Description |
 |---|---|---|
 | POST | `/api/webhooks/dispatch` | Submit a webhook |
@@ -204,6 +229,8 @@ POST /api/webhooks/dispatch
 Content-Type: application/json
 ```
 
+**Request Body:**
+
 ```json
 {
   "destinationUrl": "https://httpbin.org/post",
@@ -215,7 +242,7 @@ Content-Type: application/json
 }
 ```
 
-**Successful Response:**
+**Expected Response:**
 
 ```json
 {
@@ -227,20 +254,40 @@ Content-Type: application/json
 
 The API returns `202 Accepted` without waiting for the destination server to complete delivery.
 
+### Example cURL Request
+
+```bash
+curl -X POST https://distributed-webhook-dispatcher-lgob.onrender.com/api/webhooks/dispatch \
+-H "Content-Type: application/json" \
+-d '{
+  "destinationUrl": "https://distributed-webhook-dispatcher-lgob.onrender.com/mock/ok",
+  "eventId": "evt_123456",
+  "payload": {
+    "event": "user.signup",
+    "userId": "usr_999"
+  }
+}'
+```
+
 ## Retry Mechanism
 
-The worker automatically retries temporary delivery failures.
+The background worker automatically retries temporary delivery failures.
 
 | Attempt | Delay |
-|---|---|
+|---|---:|
 | Initial Request | Immediate |
 | Retry 1 | 2 seconds |
 | Retry 2 | 4 seconds |
 | Retry 3 | 8 seconds |
 
-Maximum delivery attempts: **4 (1 initial + 3 retries).**
+**Maximum delivery attempts: 4 (1 initial attempt + 3 retries).**
 
-Retryable failures include HTTP 5xx responses, HTTP 429 responses, timeouts, and network errors.
+Retryable failures include:
+
+- HTTP 5xx responses
+- HTTP 429 rate-limit responses
+- Request timeouts
+- Network errors
 
 Permanent client errors such as HTTP 400 and 404 are not retried.
 
@@ -272,10 +319,15 @@ Build the project:
 npm run build
 ```
 
-**Verified test results:**
-- Unit tests: 45 passed.
-- Integration tests: 26 passed.
-- Total: 71 tests passed across 9 test suites.
+### Reported Test Results
+
+| Test Category | Passed |
+|---|---:|
+| Unit Tests | 45 |
+| Integration Tests | 26 |
+| **Total** | **71** |
+
+<sub>Test counts reflect the previously recorded project results; rerun the test suite to verify the current repository state.</sub>
 
 ## Docker Commands
 
@@ -307,6 +359,25 @@ Security is an important part of the dispatcher.
 - Uses DNS IP pinning to reduce DNS rebinding risks.
 - Disables automatic HTTP redirects to prevent redirect-based SSRF bypasses.
 
+## Deployment
+
+The application is deployed on Render using Docker.
+
+Production infrastructure includes:
+
+- Docker-based application deployment.
+- PostgreSQL for persistent storage.
+- Redis for BullMQ job processing.
+- Prisma migrations during container startup.
+- Background worker execution.
+- React frontend served by the backend application.
+
+**Live Resources:**
+
+- [Live Dashboard](https://distributed-webhook-dispatcher-lgob.onrender.com)
+- [Swagger API Documentation](https://distributed-webhook-dispatcher-lgob.onrender.com/docs)
+- [Health Check](https://distributed-webhook-dispatcher-lgob.onrender.com/health)
+
 ## Future Improvements
 
 - Webhook authentication and signing.
@@ -321,10 +392,15 @@ Security is an important part of the dispatcher.
 
 B.Tech – Information Technology
 
-GitHub: [Krishn-01](https://github.com/Krishn-01)
+Noida Institute of Engineering & Technology
 
-Project Repository: [Distributed Webhook Dispatcher](https://github.com/Krishn-01/distributed-webhook-dispatcher)
+- GitHub: [Krishn-01](https://github.com/Krishn-01)
+- Project Repository: [Distributed Webhook Dispatcher](https://github.com/Krishn-01/distributed-webhook-dispatcher)
 
 ---
 
-*Built to explore reliable asynchronous processing, distributed queues, backend architecture, and webhook delivery systems.*
+<p align="center">
+
+  **Built to explore reliable asynchronous processing, distributed queues, backend architecture, and webhook delivery systems.**
+
+</p>
