@@ -8,6 +8,10 @@ module.exports = {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
   },
   moduleFileExtensions: ['ts', 'js', 'json', 'node'],
+  haste: {
+    enableSymlinks: true,
+  },
+  watchman: false,
   verbose: true,
   clearMocks: true,
   resetMocks: true,

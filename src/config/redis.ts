@@ -4,10 +4,21 @@ import { logger } from '../utils/logger';
 
 export function getRedisOptions(): RedisOptions {
   if (env.REDIS_URL) {
-    return {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    };
+    try {
+      const parsed = new URL(env.REDIS_URL);
+      const isTls = parsed.protocol === 'rediss:';
+      return {
+        host: parsed.hostname,
+        port: parsed.port ? Number(parsed.port) : (isTls ? 6380 : 6379),
+        username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+        password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+        tls: isTls ? { rejectUnauthorized: false } : undefined,
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+      };
+    } catch {
+      // fallback
+    }
   }
 
   return {
@@ -20,14 +31,8 @@ export function getRedisOptions(): RedisOptions {
 }
 
 export function createRedisClient(): Redis {
-  const client = env.REDIS_URL
-    ? new Redis(env.REDIS_URL, { maxRetriesPerRequest: null })
-    : new Redis({
-        host: env.REDIS_HOST,
-        port: env.REDIS_PORT,
-        password: env.REDIS_PASSWORD || undefined,
-        maxRetriesPerRequest: null,
-      });
+  const opts = getRedisOptions();
+  const client = new Redis(opts);
 
   client.on('error', (err) => {
     logger.error({ error: err.message }, 'Redis client connection error');
@@ -56,4 +61,3 @@ export async function checkRedisConnection(client?: Redis): Promise<boolean> {
     }
   }
 }
-

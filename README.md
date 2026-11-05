@@ -1,538 +1,363 @@
 # Distributed Webhook Dispatcher Engine
 
-A production-grade, fault-tolerant, high-throughput Distributed Webhook Dispatcher Engine built with **Node.js, TypeScript, Express, BullMQ, Redis, PostgreSQL, and Prisma ORM**.
+Live Demo URL: `https://<YOUR-APP>.onrender.com` *(replace me)*
 
-Designed to ingest internal webhook events at scale, queue them asynchronously without blocking caller API responses, deliver them to external destination servers, handle transient failures with deterministic exponential backoff, enforce strict destination-domain rate limits, and record full delivery attempt telemetry.
-
----
-
-## 1. Problem Statement
-
-In distributed systems and microservices architectures, applications need to broadcast event notifications to external third-party webhook receivers (e.g., user signup, payment notifications, status updates).
-
-However, external receiver servers present severe reliability challenges:
-- **Variable Latency**: Third-party servers may take seconds or hang indefinitely. Synchronous HTTP dispatching ties up caller threads and degrades API responsiveness.
-- **Cascading Failures & Outages**: Target servers may be down (HTTP 5xx), return rate-limit errors (HTTP 429), or drop connections.
-- **Uncontrolled Flooding**: Rapid-fire bursts to a single client endpoint can overwhelm their infrastructure.
-- **Data Loss**: Without persistent tracking and intelligent retries, failed webhooks are lost forever.
-
-This engine solves these challenges through an **asynchronous decoupled architecture**, **atomic Redis sliding-window domain rate limiting**, **SSRF protection**, and **durable PostgreSQL delivery attempt tracking**.
+> **Note on Free-Tier Hosting:** Render free web services spin down after 15 minutes of inactivity and take ~50 seconds to wake on the first request. Open `/health` in your browser first to verify the instance is awake before testing webhooks. Render free tier pairs smoothly with [Neon](https://neon.tech) / [Supabase](https://supabase.com) for PostgreSQL and [Upstash](https://upstash.com) for Redis.
 
 ---
 
-## 2. Key Features
+## 1. Project Overview
 
-- **Lightning-Fast Non-Blocking Ingestion**: Returns `HTTP 202 Accepted` immediately (< 30ms) with `status: "queued"` and `jobId`. Does not wait for downstream HTTP delivery.
-- **Strict Idempotency**: Unique constraint on `eventId` prevents duplicate event ingestion or duplicate delivery even if internal services retry ingestion.
-- **Independent Asynchronous Workers**: BullMQ worker processes consume jobs independently, decoupled from API web instances.
-- **Atomic Destination-Domain Rate Limiting**: Redis Lua script enforces a sliding-window rate limit (default: 10 req/s per destination domain) across multiple worker instances. Rate-limited jobs are deferred back to the queue without recording false delivery failures.
-- **Deterministic Exponential Backoff**:
-  - Initial attempt: Immediate
-  - Retry 1: 2 seconds
-  - Retry 2: 4 seconds
-  - Retry 3: 8 seconds
-  - Maximum total attempts: 4 (initial + 3 retries)
-  - Intelligently respects `Retry-After` HTTP headers.
-- **Error Classification**:
-  - **Retryable**: HTTP 429, HTTP 5xx, timeouts, connection drops (`ECONNREFUSED`, `ENOTFOUND`).
-  - **Permanent (No Retry)**: HTTP 4xx (400, 401, 403, 404, etc. except 429) and SSRF violations.
-- **SSRF & DNS Security Shield**: Enforces `http:`/`https:` protocols, resolves DNS, blocks private/loopback/cloud metadata subnets (127.0.0.1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254), and disables automated redirects.
-- **Durable Delivery Audit Log**: Records every HTTP delivery attempt with attempt number, response code, duration in milliseconds, error message, and timestamps.
-- **Interactive Swagger / OpenAPI UI**: Self-documenting API mounted at `/docs`.
-- **Docker & Cloud Ready**: Multi-stage `Dockerfile`, `docker-compose.yml`, and `render.yaml` infrastructure blueprint.
+The **Distributed Webhook Dispatcher** is a production-grade, asynchronous event distribution engine built with Node.js, Express, TypeScript, BullMQ, Redis, PostgreSQL, and React. It accepts outbound webhook requests with immediate non-blocking acknowledgment (`HTTP 202 Accepted`), persists all event and attempt states, reliably delivers payloads in the background with exponential backoff (2s, 4s, 8s), enforces per-destination-domain sliding-window rate limits (10 req/s), and provides a modern SaaS developer dashboard.
 
 ---
 
-## 3. Architecture Overview
+## 2. Problem Statement
 
-```
-                      +---------------------------------------+
-                      |         CLIENT APPLICATION            |
-                      +---------------------------------------+
-                                          |
-                        POST /api/webhooks/dispatch
-                                          v
-                      +---------------------------------------+
-                      |       EXPRESS.JS INGESTION API        |
-                      |  - Request Validation (Zod)           |
-                      |  - Idempotency Guard (eventId)        |
-                      |  - DB Insert (Status: QUEUED)         |
-                      |  - BullMQ Queue Push                  |
-                      |  - Instant HTTP 202 Accepted (<30ms)  |
-                      +---------------------------------------+
-                                     /         \
-                       Durable State/           \ Enqueue Job
-                                   v             v
-                    +--------------------+    +--------------------+
-                    |  PostgreSQL Store  |    |  BullMQ / Redis    |
-                    | (System of Record) |    |  (Delivery Queue)  |
-                    +--------------------+    +--------------------+
-                                                         |
-                                            Job Dequeue  | Delayed Re-enqueue
-                                                         v
-                      +---------------------------------------+
-                      |      BULLMQ BACKGROUND WORKER         |
-                      |                                       |
-                      |  1. Atomic Redis Lua Rate Limit Check |
-                      |     -> Exhausted? Defer job (no fail) |
-                      |                                       |
-                      |  2. SSRF Protection & DNS Lookup      |
-                      |     -> Block private/metadata IPs     |
-                      |                                       |
-                      |  3. Outbound HTTP Delivery (Axios)    |
-                      |     -> Timeout: 10s | Headers attached|
-                      |                                       |
-                      |  4. Status & Retry Evaluation         |
-                      |     -> 2xx: Mark DELIVERED            |
-                      |     -> 4xx: Mark FAILED (no retry)    |
-                      |     -> 5xx/429/Timeout: Backoff delay |
-                      |        (2s, 4s, 8s -> Max 4 attempts) |
-                      |                                       |
-                      |  5. Persist DeliveryAttempt Record    |
-                      +---------------------------------------+
-                                          |
-                                          v
-                      +---------------------------------------+
-                      |      EXTERNAL DESTINATION SERVER      |
-                      |   (Customer Webhook Target Endpoint)  |
-                      +---------------------------------------+
+Modern microservice and SaaS architectures frequently trigger webhooks to notify external customer APIs (e.g. `order.created`, `payment.failed`, `user.signup`). Directly issuing HTTP requests during user transactions causes critical failures:
+1. **Thread Blocking:** Slow or unresponsive downstream receivers stall application servers.
+2. **Cascading Failures:** Downstream timeouts or server outages cause unhandled message loss.
+3. **Target Flooding:** High-volume traffic spikes trigger downstream rate limiting (`HTTP 429`) or server crashes.
+4. **Security Vulnerabilities:** Naive outbound requests expose internal networks to Server-Side Request Forgery (SSRF) and DNS rebinding attacks.
+
+This engine solves these challenges through durable background queues, atomic sliding-window rate limiting, exponential backoff retries, and hardened SSRF DNS IP pinning.
+
+---
+
+## 3. Key Features
+
+- **Non-blocking Ingestion:** Responds in `< 35ms` with `HTTP 202 Accepted` and a unique `jobId`.
+- **Durable Redis Queue:** Powered by BullMQ for high-throughput, low-latency job scheduling.
+- **PostgreSQL Audit Log:** Relational persistence for events and chronological delivery attempts.
+- **Exponential Backoff:** Retries 5xx, 429, timeouts, and network drops (delays: 2s, 4s, 8s; max 4 attempts total).
+- **Per-Domain Rate Limiting:** Atomic Redis Lua script enforcing a 10 req/s sliding window without packet loss.
+- **SSRF Defense with IP Pinning:** Validates DNS, rejects private/cloud metadata ranges (`169.254.169.254`), and pins socket IPs via custom agent lookups.
+- **Mock Receivers Included:** Built-in test endpoints (`/mock/ok`, `/mock/fail`, `/mock/flaky`, `/mock/slow`, `/mock/ratelimit`).
+- **SaaS Developer Dashboard:** React 19 + Tailwind CSS dashboard with live 1s polling, KPI cards, interactive JSON editor, attempt timeline, and searchable job history.
+- **Single-Process Deployment:** Can deploy as a standalone worker container or a single combined web service (`RUN_WORKER_IN_PROCESS=true`).
+
+---
+
+## 4. Architecture Diagram
+
+```mermaid
+flowchart TD
+    Client["Client / UI / Webhook Producer"] -->|"POST /api/webhooks/dispatch"| API["Express Ingestion API"]
+    
+    subgraph Ingestion ["Ingestion Tier (< 35ms)"]
+        API -->|"1. Validate Zod Schema & SSRF"| Validate["Validation & SSRF Check"]
+        API -->|"2. Write Event (Status: QUEUED)"| DB[(PostgreSQL Database)]
+        API -->|"3. Enqueue Job"| Queue["BullMQ Queue (Redis)"]
+        API -->|"4. Return HTTP 202 Accepted"| Client
+    end
+
+    subgraph ProcessingTier ["Background Worker Engine"]
+        Queue -->|"5. Dequeue Job"| Worker["BullMQ Background Worker"]
+        Worker -->|"6. Check Rate Limit (Lua ZSET)"| RateLimit{"10 req/s Window Exceeded?"}
+        RateLimit -- "Yes" -->|"Defer with Delay"| Queue
+        RateLimit -- "No" --> Outbound["Axios Outbound Dispatcher"]
+        
+        Outbound -->|"7. DNS IP Pinning Agent"| Target["Target Destination Server"]
+        Outbound -->|"8. Record Attempt (duration, code, status)"| DB
+        
+        Target -->|"2xx Success"| Success["Mark Event DELIVERED"]
+        Target -->|"5xx / 429 / Timeout"| RetryCheck{"Attempts < 4?"}
+        RetryCheck -- "Yes (Retry 1, 2, 3)" -->|"Re-enqueue (2s, 4s, 8s backoff)"| Queue
+        RetryCheck -- "No (Max Exceeded)" --> Fail["Mark Event FAILED"]
+        Target -->|"4xx (Permanent) or SSRF"| Fail
+    end
 ```
 
 ---
 
-## 4. Technology Stack
+## 5. Technology Stack
 
-| Component | Technology | Rationale |
-|---|---|---|
-| **Runtime** | Node.js (v20+ LTS) | Asynchronous non-blocking I/O, event-loop efficiency |
-| **Language** | TypeScript (Strict Mode) | Strong type-safety, maintainability, robust interfaces |
-| **Web Framework** | Express.js | Lightweight, mature HTTP routing and middleware ecosystem |
-| **Queue Engine** | BullMQ | Redis-based distributed queue with atomic delayed jobs |
-| **Caching & Queue Store** | Redis (ioredis) | Ultra-fast in-memory queueing and atomic Lua script execution |
-| **Database & ORM** | PostgreSQL & Prisma ORM | Relational consistency, migrations, type-safe queries |
-| **HTTP Client** | Axios | Configurable timeouts, header handling, custom validation |
-| **Validation** | Zod | Runtime type safety and schema validation |
-| **Logging** | Pino | High-speed structured JSON logging with request tracing |
-| **Testing** | Jest & Supertest | Comprehensive unit and integration test coverage |
-| **Documentation** | Swagger / OpenAPI 3.0 | Standardized interactive API documentation |
-| **Containerization** | Docker & Docker Compose | Repeatable multi-container deployment |
+- **Runtime & Language:** Node.js 22 LTS, TypeScript (strict mode enabled).
+- **Web Framework:** Express.js, helmet, cors, pino-http.
+- **Queue Engine:** BullMQ, ioredis (supports Redis and TLS `rediss://`).
+- **Database & ORM:** PostgreSQL 16, Prisma ORM.
+- **Frontend Dashboard:** React 19, Vite, Tailwind CSS v4.
+- **API Documentation:** OpenAPI 3.0 / Swagger UI (`/docs`).
+- **Testing:** Jest, ts-jest, supertest.
+- **Containerization:** Docker multi-stage build, Docker Compose.
 
 ---
 
-## 5. Directory Structure
+## 6. System Workflow
+
+1. **Ingestion:** Client sends `POST /api/webhooks/dispatch` with `destinationUrl`, `eventId`, and `payload`.
+2. **Validation & Idempotency:** Zod validates inputs; database checks for existing `eventId`. If duplicate with same payload, returns original `jobId` (`202`); if payload conflicts, returns `409 Conflict`.
+3. **Queuing:** Event is written to PostgreSQL as `QUEUED`, and enqueued into BullMQ with a stable client job ID. API immediately responds with `HTTP 202 Accepted`.
+4. **Worker Consumption:** BullMQ worker receives the job and verifies the event state has not already reached `DELIVERED` or `FAILED`.
+5. **Rate Limiting:** Worker executes a Redis Lua script against the destination domain. If the 1000ms window has exceeded 10 requests, the job is deferred without incrementing failed attempt counts.
+6. **Delivery & SSRF Pinning:** Outbound request is executed via custom `http`/`https` agents that pin DNS resolution to prevent rebinding attacks.
+7. **Attempt Persistence:** Attempt details (duration, HTTP status, error message, attempt number) are committed to `delivery_attempts` in PostgreSQL.
+8. **Retry Evaluation:** On 5xx, 429, or timeout, a delayed BullMQ job is scheduled with exponential backoff (`2s`, `4s`, `8s`). On 2xx, event is updated to `DELIVERED`. On 4xx or 4 attempts exhausted, marked `FAILED`.
+
+---
+
+## 7. Database Schema Overview
 
 ```
-distributed-webhook-dispatcher/
-├── src/
-│   ├── app.ts                         # Express application setup & middleware
-│   ├── server.ts                      # HTTP server startup & graceful shutdown
-│   ├── config/
-│   │   ├── env.ts                     # Environment validation via Zod
-│   │   ├── database.ts                # PrismaClient singleton & DB healthcheck
-│   │   └── redis.ts                   # Redis client factory & connection check
-│   ├── modules/
-│   │   ├── health/
-│   │   │   ├── health.controller.ts   # GET /health implementation
-│   │   │   └── health.routes.ts       # Health router
-│   │   └── webhooks/
-│   │       ├── webhook.controller.ts  # Ingestion & retrieval HTTP handlers
-│   │       ├── webhook.routes.ts      # Express routes (/dispatch, /:jobId, /:jobId/attempts)
-│   │       ├── webhook.service.ts     # Business logic & idempotency orchestration
-│   │       ├── webhook.repository.ts  # Prisma database access layer
-│   │       ├── webhook.schema.ts      # Zod input validation schemas
-│   │       └── webhook.types.ts       # TypeScript domain models & interfaces
-│   ├── queue/
-│   │   ├── queue.connection.ts        # BullMQ shared Redis connection manager
-│   │   └── webhook.queue.ts           # BullMQ queue definition & job producer
-│   ├── workers/
-│   │   └── webhook.worker.ts          # Standalone BullMQ worker process
-│   ├── services/
-│   │   ├── delivery.service.ts        # Outbound HTTP POST delivery with telemetry
-│   │   ├── retry.service.ts           # Exponential backoff & failure classification
-│   │   └── rate-limiter.service.ts    # Redis Lua sliding-window rate limiter
-│   ├── middleware/
-│   │   ├── error.middleware.ts        # Central error handler & formatting
-│   │   ├── not-found.middleware.ts    # 404 handler
-│   │   └── request-id.middleware.ts   # X-Request-Id header propagation
-│   ├── utils/
-│   │   ├── app-error.ts               # Standardized application error classes
-│   │   ├── domain.ts                  # URL domain extractor & normalizer
-│   │   ├── logger.ts                  # Pino structured logger
-│   │   └── ssrf.ts                    # SSRF protection & private IP filter
-│   └── docs/
-│       └── swagger.ts                 # OpenAPI 3.0 specification & Swagger UI
-├── prisma/
-│   └── schema.prisma                  # PostgreSQL models (WebhookEvent, DeliveryAttempt)
-├── tests/
-│   ├── unit/
-│   │   ├── domain.test.ts             # Domain normalization unit tests
-│   │   ├── ssrf.test.ts               # SSRF & IP validator unit tests
-│   │   ├── retry.service.test.ts      # Backoff & failure evaluation tests
-│   │   ├── delivery.service.test.ts   # Outbound HTTP delivery tests
-│   │   └── rate-limiter.service.test.ts # Redis sliding window rate limiter tests
-│   └── integration/
-│       ├── webhook.api.test.ts        # End-to-end API integration tests
-│       └── worker.processing.test.ts  # Worker execution & retry flow tests
-├── docs/
-│   ├── REQUIREMENTS.md                # Traceable requirements checklist
-│   └── ARCHITECTURE.md                # System design & distributed workflows
-├── Dockerfile                         # Production multi-stage Docker build
-├── docker-compose.yml                 # Full stack Compose (API, Worker, Postgres, Redis)
-├── render.yaml                        # Render Cloud deployment blueprint
-├── Procfile                           # Process manager file
-├── postman_collection.json            # 1-Click Postman test collection
-├── tsconfig.json                      # TypeScript configuration
-├── package.json
-└── README.md
+┌─────────────────────────────────┐       ┌─────────────────────────────────┐
+│         webhook_events          │       │        delivery_attempts        │
+├─────────────────────────────────┤       ├─────────────────────────────────┤
+│ id (PK, UUID)                   │◄──┐   │ id (PK, UUID)                   │
+│ eventId (Unique, Index)         │   └───│ webhookEventId (FK, Index)      │
+│ jobId (Unique, Index)           │       │ attemptNumber (Int)             │
+│ destinationUrl (Text)           │       │ status (SUCCESS/FAILED/RETRY)   │
+│ destinationDomain (Index)       │       │ responseCode (Int, Nullable)    │
+│ payload (JSONB)                 │       │ errorMessage (Text, Nullable)   │
+│ status (QUEUED/PROC/DELIV/FAIL) │       │ durationMs (Int)                │
+│ attemptCount (Int)              │       │ createdAt (Timestamp, Index)    │
+│ lastResponseCode (Int, Nullable)│       └─────────────────────────────────┘
+│ createdAt (Timestamp, Index)    │
+│ updatedAt (Timestamp)           │
+└─────────────────────────────────┘
 ```
 
 ---
 
-## 6. Installation & Local Setup
+## 8. Queue and Worker Architecture
 
-### Prerequisites
-- **Node.js**: v20+ LTS
-- **PostgreSQL**: v14+
-- **Redis**: v6+
-
-### 1. Clone & Install Dependencies
-```bash
-git clone https://github.com/your-username/distributed-webhook-dispatcher.git
-cd distributed-webhook-dispatcher
-npm install
-```
-
-### 2. Environment Configuration
-Copy `.env.example` to `.env` and configure your credentials:
-```bash
-cp .env.example .env
-```
-
-Example `.env`:
-```env
-PORT=3000
-NODE_ENV=development
-LOG_LEVEL=info
-
-# PostgreSQL
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/webhook_dispatcher?schema=public"
-
-# Redis
-REDIS_URL="redis://localhost:6379"
-
-# Outbound Rate Limiting (per destination domain)
-RATE_LIMIT_MAX_REQUESTS=10
-RATE_LIMIT_WINDOW_MS=1000
-
-# Worker & Delivery
-WORKER_CONCURRENCY=5
-DELIVERY_TIMEOUT_MS=10000
-MAX_RETRIES=3
-ENABLE_SSRF_PROTECTION=true
-```
-
-### 3. Database Migration
-Apply Prisma schema to your PostgreSQL database:
-```bash
-npx prisma db push
-```
-
-### 4. Running the Application
-
-In development, run the API and Worker in separate terminal windows:
-
-**Terminal 1 (Express API Server):**
-```bash
-npm run dev
-```
-
-**Terminal 2 (BullMQ Background Worker):**
-```bash
-npm run dev:worker
-```
-
-The API will be available at `http://localhost:3000`.
-Interactive Swagger UI is available at `http://localhost:3000/docs`.
+- **BullMQ on Redis:** Provides atomic distributed locking, delayed job scheduling, and automatic stalled-job recovery.
+- **Unique Retry Job IDs:** Retries use suffixed IDs (`${jobId}:r${attempt}`) to avoid Redis duplicate key rejections while maintaining a stable client-facing `jobId`.
+- **Worker Modes:**
+  - **Standalone Mode:** Set `RUN_WORKER_IN_PROCESS=false` to run dedicated worker containers.
+  - **Embedded Mode:** Set `RUN_WORKER_IN_PROCESS=true` to run API and Worker inside a single Node.js process (ideal for Render free tier).
 
 ---
 
-## 7. Running with Docker Compose
+## 9. Retry Mechanism & Exponential Backoff
 
-To spin up the entire cluster (API, Worker, PostgreSQL, Redis) with a single command:
+| Attempt | Phase | Delay Gap | Total Elapsed | Action on 5xx / 429 / Timeout |
+|:---:|:---:|:---:|:---:|---|
+| **1** | Initial Delivery | 0s | 0s | On failure, schedule Retry 1 with 2s delay |
+| **2** | Retry 1 | ~2.0s | ~2.0s | On failure, schedule Retry 2 with 4s delay |
+| **3** | Retry 2 | ~4.0s | ~6.0s | On failure, schedule Retry 3 with 8s delay |
+| **4** | Retry 3 (Final) | ~8.0s | ~14.0s | On failure, mark event permanently as `FAILED` |
 
-```bash
-docker-compose up --build
-```
-
-This will automatically:
-1. Start PostgreSQL with a persistent health check.
-2. Start Redis with a health check.
-3. Apply database schemas.
-4. Launch the Express Ingestion API on `http://localhost:3000`.
-5. Launch the independent BullMQ worker listening to the Redis queue.
-
-To tear down:
-```bash
-docker-compose down -v
-```
+- **429 `Retry-After` Header:** If downstream returns `HTTP 429` with a numeric `Retry-After` header (e.g. `2`), the worker respects that exact delay (bounded up to 30s).
+- **Non-Retryable Errors:** Permanent 4xx client errors (e.g. 400 Bad Request, 404 Not Found) and SSRF security rejections fail immediately on Attempt 1.
 
 ---
 
-## 8. API Documentation & Testing
+## 10. Per-Domain Rate Limiting Mechanism
 
-### Interactive Swagger UI
-Open `http://localhost:3000/docs` in your browser.
-OpenAPI JSON schema: `http://localhost:3000/docs.json`.
+- **Sliding-Window Algorithm:** Utilizes Redis Sorted Sets (`ZSET`). Every outbound request executes an atomic Lua script:
+  1. Purges entries older than `now - 1000ms`.
+  2. Counts active requests in the current window.
+  3. If count < 10: adds timestamp to ZSET and allows request.
+  4. If count >= 10: calculates remaining delay until the oldest entry expires and defers the job.
+- **Fail-Open Policy:** If Redis rate-limiter encounters an internal error, the check fails open to prevent system-wide delivery starvation.
 
 ---
 
-### Endpoint Reference
+## 11. API Endpoints
 
-#### 1. Ingest Webhook Event
-`POST /api/webhooks/dispatch`
+| Method | Endpoint | Description | Expected Status |
+|---|---|---|---|
+| `POST` | `/api/webhooks/dispatch` | Ingest and enqueue a webhook | `202 Accepted` |
+| `GET` | `/api/webhooks` | List latest 20 webhook events | `200 OK` |
+| `GET` | `/api/webhooks/:jobId` | Retrieve status & metadata for a job | `200 OK` / `404` |
+| `GET` | `/api/webhooks/:jobId/attempts` | Chronological delivery attempts | `200 OK` / `404` |
+| `GET` | `/health` | Service health (API, DB, Redis) | `200 OK` / `503` |
+| `GET` | `/docs` | OpenAPI / Swagger UI | `200 OK` |
+| `POST/GET`| `/mock/ok` | Mock 200 OK receiver | `200 OK` |
+| `POST/GET`| `/mock/fail` | Mock 500 error receiver | `500 Error` |
+| `POST/GET`| `/mock/flaky` | Mock flaky receiver (fails 2x, then 200) | `500` / `200` |
+| `POST/GET`| `/mock/slow` | Mock slow receiver (delays 10s) | `200 OK` |
+| `POST/GET`| `/mock/ratelimit` | Mock 429 receiver (`Retry-After: 2`) | `429 RateLimit` |
 
-**Headers:**
-`Content-Type: application/json`
+---
 
-**Request Body:**
-```json
-{
-  "destinationUrl": "https://webhook.site/YOUR_UUID",
-  "eventId": "evt_order_1001",
-  "payload": {
-    "event": "order.completed",
-    "orderId": "ord_999",
-    "amount": 149.99,
-    "currency": "USD"
-  }
-}
-```
+## 12. Request & Response Examples
 
-**cURL Example:**
+### Webhook Ingestion Request:
 ```bash
 curl -X POST http://localhost:3000/api/webhooks/dispatch \
   -H "Content-Type: application/json" \
   -d '{
-    "destinationUrl": "https://webhook.site/b928c05e-8848-4cb5-888d-56d11a2f6460",
-    "eventId": "evt_test_001",
+    "destinationUrl": "https://httpbin.org/post",
+    "eventId": "evt_order_9876",
     "payload": {
-      "event": "user.signup",
-      "userId": "usr_789"
+      "event": "order.created",
+      "orderId": "ord_5521",
+      "amount": 149.99
     }
   }'
 ```
 
-**Response (`202 Accepted`):**
+### Ingestion Response (HTTP 202 Accepted):
 ```json
 {
   "status": "queued",
-  "jobId": "job_01524e93-6c84-486d-8b01-e28a554a938c",
-  "eventId": "evt_test_001"
+  "jobId": "job_e6b360f0-327c-40da-9e4a-9b480c5ba8cb",
+  "eventId": "evt_order_9876"
 }
 ```
 
----
-
-#### 2. Get Webhook Job Status
-`GET /api/webhooks/:jobId`
-
-**cURL Example:**
-```bash
-curl http://localhost:3000/api/webhooks/job_01524e93-6c84-486d-8b01-e28a554a938c
-```
-
-**Response (`200 OK`):**
+### Job Status Response (`GET /api/webhooks/job_e6b360f0-327c-40da-9e4a-9b480c5ba8cb`):
 ```json
 {
-  "jobId": "job_01524e93-6c84-486d-8b01-e28a554a938c",
-  "eventId": "evt_test_001",
-  "destinationDomain": "webhook.site",
+  "jobId": "job_e6b360f0-327c-40da-9e4a-9b480c5ba8cb",
+  "eventId": "evt_order_9876",
+  "destinationDomain": "httpbin.org",
   "status": "DELIVERED",
   "attemptCount": 1,
   "lastResponseCode": 200,
-  "createdAt": "2026-11-04T08:50:00.000Z",
-  "updatedAt": "2026-11-04T08:50:00.250Z"
+  "createdAt": "2026-11-04T18:00:00.000Z",
+  "updatedAt": "2026-11-04T18:00:00.050Z"
 }
 ```
 
 ---
 
-#### 3. Get Delivery Attempt History
-`GET /api/webhooks/:jobId/attempts`
-
-**cURL Example:**
-```bash
-curl http://localhost:3000/api/webhooks/job_01524e93-6c84-486d-8b01-e28a554a938c/attempts
-```
-
-**Response (`200 OK`):**
-```json
-{
-  "jobId": "job_01524e93-6c84-486d-8b01-e28a554a938c",
-  "attempts": [
-    {
-      "attemptNumber": 1,
-      "status": "RETRYING",
-      "responseCode": 500,
-      "errorMessage": "HTTP 500: Internal Server Error",
-      "durationMs": 88,
-      "createdAt": "2026-11-04T08:50:00.120Z"
-    },
-    {
-      "attemptNumber": 2,
-      "status": "SUCCESS",
-      "responseCode": 200,
-      "errorMessage": null,
-      "durationMs": 42,
-      "createdAt": "2026-11-04T08:50:02.162Z"
-    }
-  ]
-}
-```
-
----
-
-#### 4. Health Check
-`GET /health`
-
-**cURL Example:**
-```bash
-curl http://localhost:3000/health
-```
-
-**Response (`200 OK`):**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-11-04T08:50:00.000Z",
-  "services": {
-    "api": "up",
-    "database": "connected",
-    "redis": "connected"
-  }
-}
-```
-
----
-
-## 9. Rate Limiting Architecture
-
-Unlike inbound API rate limiting (which protects the dispatcher from clients), outbound rate limiting **protects client destination domains from being flooded**.
-
-### Algorithm: Atomic Redis Sliding-Window Log
-1. **Domain Extraction**: Every destination URL is normalized to its lower-case hostname (e.g. `https://api.merchant.com:8443/webhook` -> `api.merchant.com`).
-2. **Redis Lua Script Execution**:
-   - Maintains a Redis Sorted Set (`ZSET`) at `ratelimit:domain:{domain}`.
-   - Trims all timestamp members older than `now - windowMs`.
-   - Counts active requests in the sliding window.
-   - If count `< limit`: adds the current timestamp, refreshes TTL, and grants execution (`allowed: true`).
-   - If count `>= limit`: reads the oldest score in the window, calculates the exact millisecond delay until capacity clears (`retryAfterMs`), and returns `allowed: false`.
-3. **Deferral Without Penalty**:
-   - When a job is deferred, BullMQ re-enqueues the job with `delay: retryAfterMs`.
-   - **Crucial**: No failed delivery attempt is recorded in PostgreSQL, and `attemptCount` is not incremented.
-
----
-
-## 10. Retry Mechanism & Backoff Schedule
-
-When a delivery attempt fails, the engine classifies the failure:
-
-| Error Type | Status Code / Error | Action | Backoff Delay |
-|---|---|---|---|
-| **Server Error** | 500, 502, 503, 504 | Retry | $2000 \times 2^{\text{attempt}-1}\text{ ms}$ |
-| **Rate Limited** | 429 Too Many Requests | Retry | Calculated Backoff or bounded `Retry-After` |
-| **Network Failure** | `ECONNREFUSED`, `ENOTFOUND` | Retry | Calculated Backoff |
-| **Timeout** | `ETIMEDOUT`, 10s exceeded | Retry | Calculated Backoff |
-| **Client Error** | 400, 401, 403, 404, 422 | Permanent Failure | **No Retry** |
-| **SSRF Violation** | Private / Loopback IP | Permanent Failure | **No Retry** |
-
-### Schedule:
-- **Attempt 1**: Immediate upon pickup
-- **Attempt 2 (Retry 1)**: 2,000 ms (2 seconds)
-- **Attempt 3 (Retry 2)**: 4,000 ms (4 seconds)
-- **Attempt 4 (Retry 3)**: 8,000 ms (8 seconds)
-- **Exhaustion**: After 4 total attempts, the event status permanently transitions to `FAILED`.
-
----
-
-## 11. Security & SSRF Protection
-
-To prevent attackers from using the webhook engine to scan internal infrastructure or access cloud metadata services:
-1. **Protocol Validation**: Rejects any scheme other than `http:` or `https:`.
-2. **DNS & IP Filtering**: Before socket connection, resolves the target host and validates against banned subnets:
-   - Loopback: `127.0.0.0/8`, `::1`
-   - RFC 1918 Private: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
-   - Link-Local & Cloud Metadata: `169.254.0.0/16` (including `169.254.169.254`)
-   - Metadata Hostnames: `metadata.google.internal`, `instance-data`
-3. **Redirect Disabling**: `maxRedirects: 0` prevents open-redirect SSRF bypasses.
-
----
-
-## 12. Automated Testing
-
-The project includes unit and integration tests covering all core system requirements:
+## 13. Sample Quickstart curl Commands
 
 ```bash
-# Run all tests
+export BASE="http://localhost:3000"
+
+# 1. Clean 200 OK Delivery
+curl -s -X POST "$BASE/api/webhooks/dispatch" \
+  -H "Content-Type: application/json" \
+  -d '{"destinationUrl":"'"$BASE"'/mock/ok","eventId":"evt_demo_1","payload":{"type":"test"}}'
+
+# 2. Check Attempts History
+curl -s "$BASE/api/webhooks/<JOB_ID>/attempts"
+
+# 3. Flaky Receiver Test (Recovers on attempt 3)
+curl -s -X POST "$BASE/api/webhooks/dispatch" \
+  -H "Content-Type: application/json" \
+  -d '{"destinationUrl":"'"$BASE"'/mock/flaky?key=test_flaky","eventId":"evt_demo_2","payload":{"type":"flaky"}}'
+
+# 4. Non-blocking Slow Test (10s downstream delay)
+curl -s -w "\nIngestion Duration: %{time_total}s\n" -X POST "$BASE/api/webhooks/dispatch" \
+  -H "Content-Type: application/json" \
+  -d '{"destinationUrl":"'"$BASE"'/mock/slow","eventId":"evt_demo_3","payload":{"type":"slow"}}'
+```
+
+---
+
+## 14. Local Installation
+
+```bash
+# 1. Clone repository and install dependencies
+npm install
+npm --prefix frontend install
+
+# 2. Setup environment file
+cp .env.example .env
+
+# 3. Run database migrations and generate Prisma client
+npx prisma migrate deploy
+npx prisma generate
+
+# 4. Build application
+npm run build:all
+
+# 5. Start development servers
+npm run dev
+```
+
+---
+
+## 15. Docker Setup
+
+Spin up PostgreSQL, Redis, API, and the BullMQ Worker in isolated containers:
+
+```bash
+# Build and start all 4 containers in the background
+docker compose up --build -d
+
+# View service logs
+docker compose logs -f
+
+# Verify container health
+docker compose ps
+```
+
+- Web UI & API: `http://localhost:3000`
+- Swagger UI: `http://localhost:3000/docs`
+- PostgreSQL host port: `5434`
+- Redis host port: `6381`
+
+To stop services:
+```bash
+docker compose down
+```
+
+---
+
+## 16. Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `NODE_ENV` | `development` | Environment mode (`development`, `test`, `production`) |
+| `PORT` | `3000` | Port for the Express server |
+| `DATABASE_URL` | — | PostgreSQL connection string (`postgresql://...`) |
+| `REDIS_URL` | — | Redis connection URL (`redis://...` or TLS `rediss://...`) |
+| `RUN_WORKER_IN_PROCESS` | `true` in prod, `false` in dev | When `true`, embeds worker inside API web service |
+| `CORS_ORIGIN` | `*` | Allowed CORS origins |
+| `RATE_LIMIT_MAX_REQUESTS` | `10` | Max requests per destination domain per window |
+| `RATE_LIMIT_WINDOW_MS` | `1000` | Rate limit sliding-window duration (ms) |
+| `WORKER_CONCURRENCY` | `5` | Concurrent jobs per worker instance |
+| `DELIVERY_TIMEOUT_MS` | `10000` | Outbound request timeout (10 seconds) |
+| `MAX_RETRIES` | `3` | Maximum retries (total 4 attempts) |
+| `ENABLE_SSRF_PROTECTION` | `true` | Validates DNS and blocks private/reserved IPs |
+| `ALLOW_PRIVATE_HOSTS` | `false` | Set `true` only for local docker-compose testing |
+| `SELF_BASE_URL` | `""` | Public hostname of this app to allow calls to `/mock` |
+
+---
+
+## 17. Testing Instructions
+
+```bash
+# Run all unit and integration test suites
 npm test
 
 # Run unit tests only
 npm run test:unit
 
-# Run integration tests only
+# Run API integration tests only
 npm run test:integration
+
+# Execute 12-check automated end-to-end verification suite
+bash scripts/verify.sh http://localhost:3000
 ```
 
-### Coverage Highlights:
-- **50 Automated Tests across 7 Test Suites** (100% passing).
-- Valid / invalid payload validation & HTTP 202 immediate response time benchmark.
-- Idempotency and duplicate event suppression.
-- HTTP 500, 502, 503, 504, 429 exponential backoff retries.
-- Request timeout and network connection failure recovery.
-- Permanent HTTP 400 rejection without retry.
-- Retry exhaustion at 4 attempts.
-- Redis Lua sliding-window rate limit deferral without attempt penalization.
-- SSRF protection across IPv4 and IPv6 subnets.
-- Full delivery attempt history persistence.
+---
+
+## 18. Deployment Instructions (Render + Neon + Upstash)
+
+1. **PostgreSQL:** Create a free database on [Neon.tech](https://neon.tech) and copy the pooled URL (`?sslmode=require`).
+2. **Redis:** Create a free Redis database on [Upstash.com](https://upstash.com) and copy the TLS URL (`rediss://default:...@...`).
+3. **Web Service on Render:**
+   - Create a Web Service connected to your repository.
+   - **Build Command:** `npm install && npm run build:all && npx prisma migrate deploy`
+   - **Start Command:** `npm start`
+   - **Environment Variables:**
+     - `NODE_ENV`: `production`
+     - `PORT`: `10000`
+     - `DATABASE_URL`: `<Your Neon connection string>`
+     - `REDIS_URL`: `<Your Upstash connection string>`
+     - `RUN_WORKER_IN_PROCESS`: `true`
+     - `ENABLE_SSRF_PROTECTION`: `true`
+     - `ALLOW_PRIVATE_HOSTS`: `false`
+     - `SELF_BASE_URL`: `https://<your-app>.onrender.com`
 
 ---
 
-## 13. Production Deployment Guide
+## 19. Security Considerations
 
-### Deploying to Render
-
-This repository includes a native [`render.yaml`](file:///./render.yaml) blueprint:
-
-1. Create a free account on [Render.com](https://render.com).
-2. Create a Managed PostgreSQL Database (named `webhook-postgres`).
-3. Create a Managed Redis Instance (via Upstash or Render Redis).
-4. Connect this GitHub repository and select **New Blueprint Instance**.
-5. Render will automatically launch:
-   - **Web Service (`webhook-dispatcher-api`)**: Ingestion API with auto-scaling and `/health` health check.
-   - **Background Worker (`webhook-dispatcher-worker`)**: Dedicated BullMQ worker process.
-6. Trigger live webhooks and inspect delivery attempts via the public URL.
+- **SSRF Defense:** Evaluates destination host against IPv4 and IPv6 private, loopback, and link-local CIDR blocks.
+- **Cloud Metadata Defense:** Blocks access to `169.254.169.254` (AWS, GCP, Azure, DigitalOcean metadata service).
+- **DNS Rebinding Prevention:** Uses custom `http.Agent`/`https.Agent` with `lookup` pinning so the socket connects to the exact validated IP address.
+- **Redirect Disabling:** `maxRedirects: 0` prevents redirect-based bypasses into private internal subnets.
 
 ---
 
-## 14. Architectural Decisions & Trade-Offs
+## 20. Known Limitations
 
-1. **Why BullMQ over simple database polling?**
-   - Polling a relational database with `SELECT ... FOR UPDATE SKIP LOCKED` introduces database contention under high concurrency. BullMQ uses Redis memory structures, offering sub-millisecond job scheduling, delayed retries, and high throughput.
-2. **Why separate API and Worker processes?**
-   - Outbound HTTP requests can experience network latency or slow responses. Running workers separately from API web processes ensures that slow outbound requests never starve the ingestion event loop.
-3. **Why Sliding-Window over Fixed Window for Rate Limiting?**
-   - Fixed-window counters allow $2 \times$ bursts near boundary resets (e.g., 10 requests at second 0.99 and 10 requests at second 1.01). Sliding-window tracking via Redis Sorted Sets guarantees smooth traffic shaping with zero boundary spikes.
-4. **Idempotency Strategy**:
-   - Enforcing unique constraints on `eventId` at both the database and ingestion layer prevents duplicate deliveries if the upstream client retries an ingestion request.
-
----
-
-## 15. Technical Interview Quick Reference
-
-When reviewing or discussing this project during a technical interview:
-- **Ingestion Latency**: Handled asynchronously; the caller is unblocked immediately upon database persistence and queue enqueue (< 30ms).
-- **Delivery Guarantee**: At-least-once delivery with idempotency guards.
-- **SSRF Hardening**: Validates both IP and resolved hostname, avoiding blind HTTP requests to internal networks or cloud metadata endpoints.
-- **Rate Limit Mechanism**: Destination-domain rate limiting via atomic Redis Lua scripts (`ratelimit:domain:{domain}`). Rate-limited jobs are delayed in BullMQ without incrementing attempt count or recording fake failed attempts.
-- **Retry Strategy**: Exponential backoff $2000 \times 2^{n-1}\text{ ms}$ for $n \in \{1, 2, 3\}$, bounded at 4 total attempts. Non-retryable errors (HTTP 4xx except 429) fail immediately.
-
+- **At-Least-Once Delivery:** If a downstream receiver processes a webhook but drops the network connection before replying, the worker retries. Receivers should use the `X-Event-Id` header to deduplicate.
+- **Free-Tier Inactivity Sleep:** Free web instances sleep after 15 minutes of inactivity and take ~50 seconds to wake on first request. A ping service like UptimeRobot can keep the instance active.

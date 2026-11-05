@@ -65,6 +65,12 @@ describe('SSRF Protection & IP Validation', () => {
       await expect(validateDestinationUrl('http://169.254.169.254/latest/meta-data')).rejects.toThrow(SecurityError);
       await expect(validateDestinationUrl('http://10.0.0.5/api')).rejects.toThrow(SecurityError);
     });
+
+    it('should allow private hosts when allowPrivate flag is enabled', async () => {
+      const res = await validateDestinationUrl('http://127.0.0.1:3000/mock/ok', true, true);
+      expect(res.hostname).toBe('127.0.0.1');
+      expect(res.ip).toBe('127.0.0.1');
+      expect(res.family).toBe(4);
+    });
   });
 });
-

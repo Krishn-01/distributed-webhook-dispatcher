@@ -12,7 +12,7 @@ describe('DeliveryService', () => {
     deliveryService = new DeliveryService({ timeoutMs: 5000, ssrfProtection: false });
   });
 
-  it('should deliver webhook payload successfully with 2xx status', async () => {
+  it('should deliver webhook payload successfully with 2xx status and standard headers', async () => {
     mockedAxios.post.mockResolvedValueOnce({
       status: 200,
       data: { received: true },
@@ -36,9 +36,14 @@ describe('DeliveryService', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           'Content-Type': 'application/json',
+          'User-Agent': 'Distributed-Webhook-Dispatcher/1.0',
+          'X-Event-Id': 'evt_test_1',
+          'X-Delivery-Attempt': '1',
           'X-Webhook-Event-Id': 'evt_test_1',
           'X-Webhook-Attempt': '1',
         }),
+        httpAgent: expect.any(Object),
+        httpsAgent: expect.any(Object),
       })
     );
   });
@@ -127,4 +132,3 @@ describe('DeliveryService', () => {
     expect(result.errorMessage).toContain('ECONNREFUSED');
   });
 });
-

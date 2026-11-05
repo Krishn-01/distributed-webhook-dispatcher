@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { getRedisOptions } from '../config/redis';
+import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
 let sharedRedisConnection: Redis | null = null;
@@ -23,4 +24,3 @@ export async function closeQueueRedisConnection(): Promise<void> {
     sharedRedisConnection = null;
   }
 }
-

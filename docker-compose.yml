@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: webhook_dispatcher
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
     container_name: webhook_dispatcher_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6381:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -46,6 +46,9 @@ services:
       DATABASE_URL: "postgresql://postgres:postgrespassword@postgres:5432/webhook_dispatcher?schema=public"
       REDIS_URL: "redis://redis:6379"
       ENABLE_SSRF_PROTECTION: "true"
+      ALLOW_PRIVATE_HOSTS: "true"
+      RUN_WORKER_IN_PROCESS: "false" # Separate worker container used in Docker Compose
+      CORS_ORIGIN: "*"
       WORKER_CONCURRENCY: 5
       RATE_LIMIT_MAX_REQUESTS: 10
       RATE_LIMIT_WINDOW_MS: 1000
@@ -54,7 +57,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: sh -c "npx prisma db push && node dist/src/server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: sh -c "npx prisma migrate deploy && node dist/src/server.js"
 
   worker:
     build:
@@ -68,6 +77,7 @@ services:
       DATABASE_URL: "postgresql://postgres:postgrespassword@postgres:5432/webhook_dispatcher?schema=public"
       REDIS_URL: "redis://redis:6379"
       ENABLE_SSRF_PROTECTION: "true"
+      ALLOW_PRIVATE_HOSTS: "true"
       WORKER_CONCURRENCY: 5
       RATE_LIMIT_MAX_REQUESTS: 10
       RATE_LIMIT_WINDOW_MS: 1000
@@ -77,10 +87,9 @@ services:
       redis:
         condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy
     command: node dist/src/workers/webhook.worker.js
 
 volumes:
   postgres_data:
   redis_data:
-

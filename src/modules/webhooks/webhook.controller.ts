@@ -25,6 +25,30 @@ export class WebhookController {
   };
 
   /**
+   * GET /api/webhooks
+   * Retrieves latest 20 webhook events for dashboard monitoring.
+   */
+  getRecent = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const events = await this.service.getRecent(20);
+      res.status(200).json({
+        events: events.map((details) => ({
+          jobId: details.jobId,
+          eventId: details.eventId,
+          destinationDomain: details.destinationDomain,
+          status: details.status,
+          attemptCount: details.attemptCount,
+          lastResponseCode: details.lastResponseCode,
+          createdAt: details.createdAt,
+          updatedAt: details.updatedAt,
+        })),
+      });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  /**
    * GET /api/webhooks/:jobId
    * Retrieves current status and execution metadata of a webhook job.
    */
@@ -75,4 +99,3 @@ export class WebhookController {
 }
 
 export const webhookController = new WebhookController();
-

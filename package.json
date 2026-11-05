@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:worker": "tsx watch src/workers/webhook.worker.ts",
-    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:backend": "rimraf dist && tsc -p tsconfig.build.json",
+    "build:all": "npm run build:frontend && npm run build:backend",
+    "build": "npm run build:all",
     "start": "node dist/src/server.js",
     "start:worker": "node dist/src/workers/webhook.worker.js",
     "test": "jest --runInBand --detectOpenHandles --forceExit",
@@ -17,7 +20,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "postinstall": "npm --prefix frontend install && prisma generate"
   },
   "keywords": [
     "webhook",
@@ -32,8 +36,10 @@
   "license": "MIT",
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@types/cors": "^2.8.19",
     "axios": "^1.7.9",
     "bullmq": "^5.34.4",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "ioredis": "^5.4.2",
@@ -60,4 +66,3 @@
     "typescript": "^5.7.3"
   }
 }
-

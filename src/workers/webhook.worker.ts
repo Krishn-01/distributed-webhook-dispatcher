@@ -13,6 +13,11 @@ import { logger } from '../utils/logger';
 export class WebhookWorker {
   private worker: Worker<WebhookJobData> | null = null;
   private isShuttingDown = false;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+
+  public isRunning(): boolean {
+    return this.worker !== null && !this.isShuttingDown;
+  }
 
   public start(): Worker<WebhookJobData> {
     if (this.worker) {
@@ -30,12 +35,23 @@ export class WebhookWorker {
         connection,
         concurrency: env.WORKER_CONCURRENCY,
         lockDuration: 30000,
+        drainDelay: 30, // Free-tier optimization: poll less aggressively when queue is drained
+        stalledInterval: 60000, // Free-tier optimization: reduce stalled lock check frequency
       }
     );
 
     this.worker.on('ready', () => {
       logger.info({ concurrency: env.WORKER_CONCURRENCY }, 'Webhook background worker started and ready');
+      connection.set('bullmq:worker:heartbeat', Date.now().toString(), 'EX', 30).catch(() => {});
     });
+
+    if (!this.heartbeatInterval) {
+      this.heartbeatInterval = setInterval(() => {
+        if (this.worker && !this.isShuttingDown) {
+          connection.set('bullmq:worker:heartbeat', Date.now().toString(), 'EX', 30).catch(() => {});
+        }
+      }, 10000);
+    }
 
     this.worker.on('completed', (job: Job<WebhookJobData>) => {
       logger.info({ jobId: job.id, eventId: job.data.eventId }, 'Webhook job processed completely');
@@ -75,11 +91,17 @@ export class WebhookWorker {
       return;
     }
 
-    // Idempotency: If already delivered, skip redundant processing
-    if (event.status === WebhookStatus.DELIVERED) {
-      logger.info({ eventId }, 'Webhook already marked DELIVERED. Skipping delivery.');
+    // Idempotency: Skip only if already DELIVERED or permanently FAILED
+    // Allows re-running if status is PROCESSING (stalled job recovery)
+    if (event.status === WebhookStatus.DELIVERED || event.status === WebhookStatus.FAILED) {
+      logger.info(
+        { eventId, status: event.status },
+        'Webhook already marked DELIVERED or FAILED. Skipping delivery.'
+      );
       return;
     }
+
+    const clientJobId = event.jobId || `job_${webhookEventId}`;
 
     // 2. Destination-domain Rate Limiting Check
     const rateLimit = await rateLimiterService.checkDomainRateLimit(destinationDomain);
@@ -94,7 +116,9 @@ export class WebhookWorker {
         'Rate limit exhausted for domain. Deferring job without counting as an attempt.'
       );
 
+      const deferJobId = `${clientJobId}_d_${Date.now()}`;
       await webhookQueue.addJob(job.data, {
+        jobId: deferJobId,
         delay: rateLimit.retryAfterMs,
       });
       return;
@@ -175,12 +199,14 @@ export class WebhookWorker {
         'Scheduling delayed webhook retry'
       );
 
+      const retryJobId = `${clientJobId}_r${nextAttemptNumber}`;
       await webhookQueue.addJob(
         {
           ...job.data,
           attemptNumber: nextAttemptNumber,
         },
         {
+          jobId: retryJobId,
           delay: retryEval.delayMs,
         }
       );
@@ -221,6 +247,10 @@ export class WebhookWorker {
     this.isShuttingDown = true;
 
     logger.info('Shutting down webhook worker gracefully...');
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
     if (this.worker) {
       await this.worker.close();
       this.worker = null;
@@ -234,7 +264,7 @@ export const webhookWorker = new WebhookWorker();
 
 // Standalone execution entrypoint
 if (require.main === module) {
-  const workerInstance = webhookWorker.start();
+  webhookWorker.start();
 
   const handleTermination = async (signal: string) => {
     logger.info({ signal }, 'Termination signal received in worker');
@@ -245,4 +275,3 @@ if (require.main === module) {
   process.on('SIGTERM', () => void handleTermination('SIGTERM'));
   process.on('SIGINT', () => void handleTermination('SIGINT'));
 }
-

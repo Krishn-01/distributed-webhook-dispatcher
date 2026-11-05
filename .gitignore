@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+**/node_modules/
 .pnp
 .pnp.js
 
@@ -9,15 +10,15 @@ coverage/
 
 # Production build artifacts
 dist/
+**/dist/
 build/
+**/build/
 *.tsbuildinfo
 
 # Environment and secrets
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 *.pem
 *.key
 
@@ -41,4 +42,3 @@ Thumbs.db
 docker-data/
 postgres-data/
 redis-data/
-

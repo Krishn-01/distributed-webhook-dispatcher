@@ -119,7 +119,16 @@ export class WebhookRepository {
       orderBy: { createdAt: 'asc' },
     });
   }
+
+  /**
+   * Retrieves the most recent webhook events.
+   */
+  async listRecent(limit = 20): Promise<WebhookEvent[]> {
+    return prisma.webhookEvent.findMany({
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 }
 
 export const webhookRepository = new WebhookRepository();
-

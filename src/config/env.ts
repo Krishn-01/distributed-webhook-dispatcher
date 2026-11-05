@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 dotenv.config();
 
+const isProd = process.env.NODE_ENV === 'production';
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000),
@@ -21,6 +23,16 @@ const envSchema = z.object({
     .string()
     .transform((val) => val === 'true' || val === '1')
     .default('true'),
+  ALLOW_PRIVATE_HOSTS: z
+    .string()
+    .transform((val) => val === 'true' || val === '1')
+    .default('false'),
+  SELF_BASE_URL: z.string().optional(),
+  RUN_WORKER_IN_PROCESS: z
+    .string()
+    .transform((val) => val === 'true' || val === '1')
+    .default(isProd ? 'true' : 'false'),
+  CORS_ORIGIN: z.string().default('*'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -31,4 +43,3 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
-

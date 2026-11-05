@@ -2,7 +2,7 @@
   "info": {
     "name": "Distributed Webhook Dispatcher Engine",
     "_postman_id": "a983b745-f033-4f93-b413-5a02298bc671",
-    "description": "Complete Postman collection for the Distributed Webhook Dispatcher Engine.",
+    "description": "Complete Postman collection for the Distributed Webhook Dispatcher Engine with built-in mock receivers.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -19,7 +19,7 @@
   ],
   "item": [
     {
-      "name": "Health Check",
+      "name": "1. Health Check",
       "request": {
         "method": "GET",
         "header": [],
@@ -32,15 +32,15 @@
       }
     },
     {
-      "name": "Dispatch Webhook (Valid)",
+      "name": "2. Dispatch to Mock OK (200 Success)",
       "event": [
         {
           "listen": "test",
           "script": {
             "exec": [
-              "var jsonData = pm.response.json();",
-              "if (jsonData.jobId) {",
-              "    pm.collectionVariables.set('jobId', jsonData.jobId);",
+              "const json = pm.response.json();",
+              "if (json.jobId) {",
+              "    pm.collectionVariables.set('jobId', json.jobId);",
               "}"
             ],
             "type": "text/javascript"
@@ -57,18 +57,18 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"destinationUrl\": \"https://webhook.site/test-endpoint\",\n  \"eventId\": \"evt_{{$timestamp}}\",\n  \"payload\": {\n    \"event\": \"user.signup\",\n    \"userId\": \"usr_999\",\n    \"timestamp\": \"{{$isoTimestamp}}\"\n  }\n}"
+          "raw": "{\n  \"destinationUrl\": \"{{baseUrl}}/mock/ok\",\n  \"eventId\": \"evt_postman_{{$randomUUID}}\",\n  \"payload\": {\n    \"event\": \"payment.completed\",\n    \"amount\": 99.50,\n    \"currency\": \"USD\"\n  }\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/webhooks/dispatch",
           "host": ["{{baseUrl}}"],
           "path": ["api", "webhooks", "dispatch"]
         },
-        "description": "Ingests a webhook event, returns 202 Accepted immediately, queues for async delivery."
+        "description": "Dispatches webhook to /mock/ok. Responds immediately with 202 Accepted."
       }
     },
     {
-      "name": "Dispatch Webhook (Duplicate Idempotency)",
+      "name": "3. Dispatch to Mock Fail (500 Retries)",
       "request": {
         "method": "POST",
         "header": [
@@ -79,18 +79,18 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"destinationUrl\": \"https://webhook.site/test-endpoint\",\n  \"eventId\": \"evt_fixed_idempotent_test\",\n  \"payload\": {\n    \"event\": \"payment.completed\",\n    \"orderId\": \"ord_1001\"\n  }\n}"
+          "raw": "{\n  \"destinationUrl\": \"{{baseUrl}}/mock/fail\",\n  \"eventId\": \"evt_fail_{{$randomUUID}}\",\n  \"payload\": {\n    \"event\": \"test.failure\"\n  }\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/webhooks/dispatch",
           "host": ["{{baseUrl}}"],
           "path": ["api", "webhooks", "dispatch"]
         },
-        "description": "Submitting same eventId multiple times returns existing jobId without double enqueueing."
+        "description": "Dispatches to /mock/fail. Worker will retry 3 times with exponential backoff (2s, 4s, 8s)."
       }
     },
     {
-      "name": "Dispatch Webhook (Invalid URL - Validation Error)",
+      "name": "4. Dispatch to Mock Flaky (Succeeds on Attempt 3)",
       "request": {
         "method": "POST",
         "header": [
@@ -101,18 +101,62 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"destinationUrl\": \"ftp://invalid-protocol.com/hook\",\n  \"eventId\": \"evt_bad_url\",\n  \"payload\": {\n    \"test\": true\n  }\n}"
+          "raw": "{\n  \"destinationUrl\": \"{{baseUrl}}/mock/flaky?key=pm_{{$randomUUID}}\",\n  \"eventId\": \"evt_flaky_{{$randomUUID}}\",\n  \"payload\": {\n    \"event\": \"test.flaky\"\n  }\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/webhooks/dispatch",
           "host": ["{{baseUrl}}"],
           "path": ["api", "webhooks", "dispatch"]
         },
-        "description": "Tests validation error for non-HTTP(S) protocols."
+        "description": "Dispatches to /mock/flaky. Fails twice with 500, then succeeds on attempt 3."
       }
     },
     {
-      "name": "Get Webhook Job Status",
+      "name": "5. Dispatch to Mock Slow (Async 10s Non-blocking)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinationUrl\": \"{{baseUrl}}/mock/slow\",\n  \"eventId\": \"evt_slow_{{$randomUUID}}\",\n  \"payload\": {\n    \"event\": \"test.slow\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/dispatch",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks", "dispatch"]
+        },
+        "description": "Dispatches to /mock/slow. Ingestion API returns in < 30ms despite downstream 10s latency."
+      }
+    },
+    {
+      "name": "6. Dispatch to Mock Rate Limit (429 Retry-After)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinationUrl\": \"{{baseUrl}}/mock/ratelimit\",\n  \"eventId\": \"evt_ratelimit_{{$randomUUID}}\",\n  \"payload\": {\n    \"event\": \"test.ratelimit\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/dispatch",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks", "dispatch"]
+        },
+        "description": "Dispatches to /mock/ratelimit. Receives 429 and honors Retry-After header."
+      }
+    },
+    {
+      "name": "7. Get Webhook Job Status",
       "request": {
         "method": "GET",
         "header": [],
@@ -121,11 +165,11 @@
           "host": ["{{baseUrl}}"],
           "path": ["api", "webhooks", "{{jobId}}"]
         },
-        "description": "Returns current delivery status, attempt count, domain, and last response code."
+        "description": "Retrieves the current execution status, attempt count and timestamps."
       }
     },
     {
-      "name": "Get Delivery Attempt History",
+      "name": "8. Get Delivery Attempts History",
       "request": {
         "method": "GET",
         "header": [],
@@ -134,9 +178,21 @@
           "host": ["{{baseUrl}}"],
           "path": ["api", "webhooks", "{{jobId}}", "attempts"]
         },
-        "description": "Returns chronological delivery attempt log (attempt number, HTTP response code, duration, timestamps)."
+        "description": "Retrieves chronological attempt history with duration, status and error messages."
+      }
+    },
+    {
+      "name": "9. List Recent Webhooks",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "webhooks"]
+        },
+        "description": "Retrieves the latest 20 webhook events."
       }
     }
   ]
 }
-

@@ -1,12 +1,12 @@
 services:
-  # 1. Express API Ingestion Web Service
+  # Single-process Web Service (Runs Express API + Embedded BullMQ Worker + Serves React Frontend)
   - type: web
-    name: webhook-dispatcher-api
+    name: webhook-dispatcher
     env: node
     plan: free
     region: oregon
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: npx prisma db push && npm start
+    buildCommand: npm install && npm run build:all && npx prisma migrate deploy
+    startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -15,53 +15,22 @@ services:
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        fromDatabase:
-          name: webhook-postgres
-          property: connectionString
+        sync: false
       - key: REDIS_URL
-        value: rediss://default:password@host:port # Configured via Render Redis or Upstash Redis
+        sync: false
       - key: LOG_LEVEL
         value: info
+      - key: RUN_WORKER_IN_PROCESS
+        value: "true"
       - key: ENABLE_SSRF_PROTECTION
         value: "true"
+      - key: ALLOW_PRIVATE_HOSTS
+        value: "false"
+      - key: SELF_BASE_URL
+        value: "" # Set to your Render service URL (e.g. https://webhook-dispatcher.onrender.com)
+      - key: CORS_ORIGIN
+        value: "*"
       - key: RATE_LIMIT_MAX_REQUESTS
         value: "10"
       - key: RATE_LIMIT_WINDOW_MS
         value: "1000"
-
-  # 2. BullMQ Asynchronous Background Delivery Worker
-  - type: worker
-    name: webhook-dispatcher-worker
-    env: node
-    plan: free
-    region: oregon
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: npm run start:worker
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: webhook-postgres
-          property: connectionString
-      - key: REDIS_URL
-        value: rediss://default:password@host:port # Configured via Render Redis or Upstash Redis
-      - key: LOG_LEVEL
-        value: info
-      - key: WORKER_CONCURRENCY
-        value: "5"
-      - key: ENABLE_SSRF_PROTECTION
-        value: "true"
-      - key: RATE_LIMIT_MAX_REQUESTS
-        value: "10"
-      - key: RATE_LIMIT_WINDOW_MS
-        value: "1000"
-
-databases:
-  - name: webhook-postgres
-    plan: free
-    region: oregon
-    databaseName: webhook_dispatcher
-    user: webhook_admin
-

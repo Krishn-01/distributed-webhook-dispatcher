@@ -1,5 +1,13 @@
 import dns from 'dns/promises';
+import net from 'net';
 import { SecurityError } from './app-error';
+import { env } from '../config/env';
+
+export interface ValidatedDestination {
+  ip: string;
+  hostname: string;
+  family: 4 | 6;
+}
 
 /**
  * Checks whether an IPv4 address belongs to a reserved, private, loopback, or metadata subnet.
@@ -86,10 +94,28 @@ export function isPrivateOrReservedIP(ip: string): boolean {
 }
 
 /**
+ * Checks if a hostname matches the configured SELF_BASE_URL.
+ */
+function isSelfHost(hostname: string): boolean {
+  if (!env.SELF_BASE_URL) return false;
+  try {
+    const parsedSelf = new URL(env.SELF_BASE_URL);
+    return parsedSelf.hostname.toLowerCase() === hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Validates destination URL for SSRF protection by resolving DNS and ensuring
  * the resolved IP address is not private, loopback, link-local, or cloud metadata.
+ * Returns validated IP and family for DNS pinning.
  */
-export async function validateDestinationUrl(urlStr: string, enabled = true): Promise<{ ip: string; hostname: string }> {
+export async function validateDestinationUrl(
+  urlStr: string,
+  enabled = true,
+  allowPrivate = env.ALLOW_PRIVATE_HOSTS
+): Promise<ValidatedDestination> {
   let parsed: URL;
   try {
     parsed = new URL(urlStr);
@@ -108,28 +134,56 @@ export async function validateDestinationUrl(urlStr: string, enabled = true): Pr
     throw new SecurityError(`Access to cloud metadata hostnames is forbidden.`);
   }
 
-  if (!enabled) {
-    return { ip: hostname, hostname };
+  const isSelf = isSelfHost(hostname);
+  const isIp = net.isIP(hostname);
+
+  // If hostname is already a raw IP literal (IPv4 or IPv6)
+  if (isIp !== 0) {
+    if (enabled && isPrivateOrReservedIP(hostname)) {
+      if (!allowPrivate && !isSelf) {
+        throw new SecurityError(`Access to private or reserved IP address "${hostname}" is forbidden.`);
+      }
+    }
+    return {
+      ip: hostname,
+      hostname,
+      family: (isIp === 6 ? 6 : 4) as 4 | 6,
+    };
   }
 
-  // If hostname is already an IP
-  if (isPrivateOrReservedIP(hostname)) {
-    throw new SecurityError(`Access to private or reserved IP address "${hostname}" is forbidden.`);
-  }
-
+  // Resolve DNS for hostname
+  let lookup: Array<{ address: string; family: number }>;
   try {
-    const lookup = await dns.lookup(hostname, { all: true });
+    lookup = await dns.lookup(hostname, { all: true });
+  } catch (err) {
+    if (!enabled) {
+      return { ip: '127.0.0.1', hostname, family: 4 };
+    }
+    throw new SecurityError(`Unable to resolve destination hostname "${hostname}": ${(err as Error).message}`);
+  }
+
+  if (!lookup || lookup.length === 0 || !lookup[0]?.address) {
+    throw new SecurityError(`Unable to resolve destination hostname "${hostname}".`);
+  }
+
+  // Enforce private/reserved IP restrictions in production
+  if (enabled && !allowPrivate && !isSelf) {
     for (const record of lookup) {
       if (isPrivateOrReservedIP(record.address)) {
         throw new SecurityError(`Destination host "${hostname}" resolves to restricted IP "${record.address}".`);
       }
     }
-    return { ip: lookup[0]?.address ?? hostname, hostname };
-  } catch (err) {
-    if (err instanceof SecurityError) {
-      throw err;
-    }
-    throw new SecurityError(`Unable to resolve destination hostname "${hostname}": ${(err as Error).message}`);
   }
-}
 
+  const first = lookup[0];
+  const ipFamily = net.isIP(first.address);
+  if (ipFamily === 0) {
+    throw new SecurityError(`Resolved IP address "${first.address}" for host "${hostname}" is invalid.`);
+  }
+
+  return {
+    ip: first.address,
+    hostname,
+    family: (first.family === 6 || ipFamily === 6 ? 6 : 4) as 4 | 6,
+  };
+}

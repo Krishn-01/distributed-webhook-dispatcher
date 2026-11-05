@@ -139,9 +139,9 @@ describe('Worker Processing & Orchestration Integration Tests', () => {
       expect.objectContaining({
         attemptNumber: 2,
       }),
-      {
+      expect.objectContaining({
         delay: 2000,
-      }
+      })
     );
   });
 
@@ -271,10 +271,13 @@ describe('Worker Processing & Orchestration Integration Tests', () => {
     const job = createMockJob(1);
     await worker.processJob(job);
 
-    // 1. Re-enqueues job with delay = retryAfterMs
-    expect(mockedQueue.addJob).toHaveBeenCalledWith(job.data, {
-      delay: 450,
-    });
+    // 1. Re-enqueues job with delay = retryAfterMs and unique deferral jobId
+    expect(mockedQueue.addJob).toHaveBeenCalledWith(
+      job.data,
+      expect.objectContaining({
+        delay: 450,
+      })
+    );
 
     // 2. Crucial: Must NOT call delivery, must NOT record a failed attempt in DB!
     expect(mockedDelivery.deliver).not.toHaveBeenCalled();
@@ -302,5 +305,66 @@ describe('Worker Processing & Orchestration Integration Tests', () => {
     expect(mockedDelivery.deliver).not.toHaveBeenCalled();
     expect(mockedRepo.recordAttempt).not.toHaveBeenCalled();
   });
-});
 
+  it('Reliability: should skip delivery if event is already marked FAILED', async () => {
+    mockedRepo.findById.mockResolvedValueOnce({
+      id: 'event-uuid-1',
+      eventId: 'evt_test_failed',
+      destinationUrl: 'https://client.site/webhook',
+      destinationDomain: 'client.site',
+      payload: {},
+      status: WebhookStatus.FAILED,
+      jobId: 'bullmq-job-1',
+      attemptCount: 4,
+      lastResponseCode: 500,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const job = createMockJob(1);
+    await worker.processJob(job);
+
+    expect(mockedDelivery.deliver).not.toHaveBeenCalled();
+    expect(mockedRepo.recordAttempt).not.toHaveBeenCalled();
+  });
+
+  it('Reliability: should re-run delivery if event is in PROCESSING state (stalled-job recovery)', async () => {
+    mockedRepo.findById.mockResolvedValueOnce({
+      id: 'event-uuid-1',
+      eventId: 'evt_test_processing_recovery',
+      destinationUrl: 'https://client.site/webhook',
+      destinationDomain: 'client.site',
+      payload: {},
+      status: WebhookStatus.PROCESSING, // Worker stalled or crashed during previous attempt
+      jobId: 'bullmq-job-1',
+      attemptCount: 1,
+      lastResponseCode: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockedRateLimiter.checkDomainRateLimit.mockResolvedValueOnce({
+      allowed: true,
+      retryAfterMs: 0,
+      remaining: 9,
+    });
+
+    mockedDelivery.deliver.mockResolvedValueOnce({
+      success: true,
+      statusCode: 200,
+      durationMs: 50,
+      errorMessage: null,
+    });
+
+    const job = createMockJob(1);
+    await worker.processJob(job);
+
+    // Should NOT be skipped - must be delivered successfully
+    expect(mockedDelivery.deliver).toHaveBeenCalledTimes(1);
+    expect(mockedRepo.updateStatus).toHaveBeenCalledWith('event-uuid-1', {
+      status: WebhookStatus.DELIVERED,
+      attemptCount: 1,
+      lastResponseCode: 200,
+    });
+  });
+});

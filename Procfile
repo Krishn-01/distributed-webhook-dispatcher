@@ -1,3 +1,1 @@
-web: npx prisma db push && npm start
-worker: npm run start:worker
-
+web: npx prisma migrate deploy && npm start
