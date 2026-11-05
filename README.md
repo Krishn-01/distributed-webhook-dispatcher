@@ -4,23 +4,42 @@
 
 <p align="center">
 
-  [![Node.js](https://img.shields.io/badge/Node.js-22%2B-green?logo=node.js)](https://nodejs.org/)
-  [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
-  [![Redis](https://img.shields.io/badge/Redis-BullMQ-red?logo=redis)](https://redis.io/)
-  [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-blue?logo=postgresql)](https://www.postgresql.org/)
-  [![Docker](https://img.shields.io/badge/Container-Docker-blue?logo=docker)](https://www.docker.com/)
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-green?logo=node.js)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Redis](https://img.shields.io/badge/Redis-BullMQ-red?logo=redis)](https://redis.io/)
+[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-blue?logo=postgresql)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/Container-Docker-blue?logo=docker)](https://www.docker.com/)
 
 </p>
+
+---
+
+## 🚀 Live Project Links
 
 <p align="center">
 
-  **[Live Dashboard](https://distributed-webhook-dispatcher-lgob.onrender.com)**
-  |
-  **[API Documentation](https://distributed-webhook-dispatcher-lgob.onrender.com/docs)**
-  |
-  **[GitHub Repository](https://github.com/Krishn-01/distributed-webhook-dispatcher)**
+### 🌐 [LIVE DEMO — OPEN DASHBOARD](https://distributed-webhook-dispatcher-lgob.onrender.com)
+
+Explore the deployed application and interact with the webhook management dashboard.
 
 </p>
+
+| Resource | Description | Link |
+|---|---|---|
+| 🌐 Live Demo | Production Dashboard | [Open Live Demo](https://distributed-webhook-dispatcher-lgob.onrender.com) |
+| ⚡ API Base URL | Production API Server | [Open API](https://distributed-webhook-dispatcher-lgob.onrender.com) |
+| 📘 Swagger Documentation | Explore and test API endpoints | [Open Swagger UI](https://distributed-webhook-dispatcher-lgob.onrender.com/docs) |
+| ❤️ Health Check | Check application availability | [Check API Health](https://distributed-webhook-dispatcher-lgob.onrender.com/health) |
+| 💻 GitHub Repository | Source code and project files | [View on GitHub](https://github.com/Krishn-01/distributed-webhook-dispatcher) |
+
+**Quick Start for Reviewers**
+
+1. Open the [Live Dashboard](https://distributed-webhook-dispatcher-lgob.onrender.com) to explore the application.
+2. Visit [Swagger Documentation](https://distributed-webhook-dispatcher-lgob.onrender.com/docs) to explore and test API endpoints.
+3. Check the [Health Endpoint](https://distributed-webhook-dispatcher-lgob.onrender.com/health) to verify application availability.
+4. Visit the [GitHub Repository](https://github.com/Krishn-01/distributed-webhook-dispatcher) to review the source code.
+
+<sub>Note: The application is hosted on Render's free-tier infrastructure. The first request after an idle period may take some time while the service starts.</sub>
 
 ---
 
@@ -372,11 +391,13 @@ Production infrastructure includes:
 - Background worker execution.
 - React frontend served by the backend application.
 
-**Live Resources:**
+**Production Resources:**
 
 - [Live Dashboard](https://distributed-webhook-dispatcher-lgob.onrender.com)
+- [Production API](https://distributed-webhook-dispatcher-lgob.onrender.com)
 - [Swagger API Documentation](https://distributed-webhook-dispatcher-lgob.onrender.com/docs)
 - [Health Check](https://distributed-webhook-dispatcher-lgob.onrender.com/health)
+- [GitHub Source Code](https://github.com/Krishn-01/distributed-webhook-dispatcher)
 
 ## Future Improvements
 
@@ -401,6 +422,6 @@ Noida Institute of Engineering & Technology
 
 <p align="center">
 
-  **Built to explore reliable asynchronous processing, distributed queues, backend architecture, and webhook delivery systems.**
+**Built to explore reliable asynchronous processing, distributed queues, backend architecture, and webhook delivery systems.**
 
 </p>
