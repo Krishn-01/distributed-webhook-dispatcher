@@ -409,7 +409,7 @@ Production infrastructure includes:
 
 ## Author
 
-**Krishna Kumar Pandey**
+**Krishn Kumar Pandey**
 
 B.Tech – Information Technology
 
